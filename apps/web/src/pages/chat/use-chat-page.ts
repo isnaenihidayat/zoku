@@ -121,6 +121,7 @@ export function useChatPage() {
   const [composerDraft, setComposerDraft] = useState("");
   const [queuedMessages, setQueuedMessages] = useState<QueuedComposerMessage[]>([]);
   const [pendingToolApproval, setPendingToolApproval] = useState<{
+    sessionId: string;
     toolCallId: string;
     tool: string;
     input: Record<string, unknown>;
@@ -697,6 +698,7 @@ export function useChatPage() {
             onContextUsage: setContextUsage,
             onToolApprovalRequest: (event) =>
               setPendingToolApproval({
+                sessionId: activeSession.id,
                 toolCallId: event.toolCallId,
                 tool: event.tool,
                 input: event.input,
@@ -814,7 +816,7 @@ export function useChatPage() {
       approvalResolvingRef.current = true;
       try {
         const response = await fetch(
-          `/api/v1/sessions/${encodeURIComponent(session.id)}/tool-approvals`,
+          `/api/v1/sessions/${encodeURIComponent(current.sessionId)}/tool-approvals`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
