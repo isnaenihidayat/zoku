@@ -816,7 +816,7 @@ export function useChatPage() {
       approvalResolvingRef.current = true;
       try {
         const response = await fetch(
-          `/api/v1/sessions/${encodeURIComponent(current.sessionId)}/tool-approvals`,
+          `/v1/sessions/${encodeURIComponent(current.sessionId)}/tool-approvals`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
