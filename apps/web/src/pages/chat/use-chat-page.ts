@@ -128,6 +128,7 @@ export function useChatPage() {
   const streamAbortRef = useRef<AbortController | null>(null);
   const messageQueueRef = useRef<QueuedSend[]>([]);
   const isSendingRef = useRef(false);
+  const approvalResolvingRef = useRef(false);
   const skipNextProfileSessionRef = useRef(false);
   const loadedRouteRef = useRef<string | null>(null);
   const profileIdRef = useRef(profileId);
@@ -753,6 +754,7 @@ export function useChatPage() {
         setCanStop(false);
         setBusy(false);
         setTurnStartedAt(null);
+        setPendingToolApproval(null);
 
         const next = shouldDrainQueue ? messageQueueRef.current.shift() : null;
         if (next) {
@@ -806,9 +808,10 @@ export function useChatPage() {
   const resolveToolApproval = useCallback(
     async (decision: "approve" | "reject") => {
       const current = pendingToolApproval;
-      if (!current || !session) {
+      if (!current || !session || approvalResolvingRef.current) {
         return;
       }
+      approvalResolvingRef.current = true;
       try {
         const response = await fetch(
           `/api/v1/sessions/${encodeURIComponent(session.id)}/tool-approvals`,
@@ -824,6 +827,7 @@ export function useChatPage() {
       } catch (err) {
         setError(formatError(err));
       } finally {
+        approvalResolvingRef.current = false;
         setPendingToolApproval(null);
       }
     },
