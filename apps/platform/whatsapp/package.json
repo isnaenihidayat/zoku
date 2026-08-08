@@ -1,0 +1,16 @@
+{
+  "name": "@zoku/whatsapp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "NODE_ENV=production bun run src/index.ts",
+    "dev": "bun run src/index.ts",
+    "build": "bun build ./src/index.ts --outdir dist --target bun --external link-preview-js --external jimp --external sharp --external qrcode-terminal",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@zoku/client": "workspace:*",
+    "@zoku/core": "workspace:*",
+    "@whiskeysockets/baileys": "6.7.23"
+  }
+}

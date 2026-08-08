@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/zoku", "destination": "/index.html" },
+    { "source": "/zoku/", "destination": "/index.html" },
+    { "source": "/zoku/:path*", "destination": "/:path*" }
+  ]
+}

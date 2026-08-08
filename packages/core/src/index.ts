@@ -1,0 +1,84 @@
+export * from "./agent-todo";
+export * from "./agent-questionnaire";
+export * from "./api-error";
+export * from "./artifacts";
+export * from "./artifact-shares";
+export * from "./artifact-mime";
+export * from "./automation-validate";
+export * from "./automation-delivery";
+export * from "./automation-run-read";
+export * from "./channel-artifacts";
+export * from "./channel-artifact-delivery";
+export * from "./channels";
+export * from "./automation-scheduler";
+export * from "./automation-worker";
+export * from "./config";
+export * from "./contract";
+export * from "./fs";
+export * from "./message-content";
+export * from "./attachments/store";
+export * from "./attachments/content";
+export * from "./document-content";
+export * from "./image-content";
+export * from "./normalize-task-prompt";
+export * from "./notification-destinations";
+export * from "./ids";
+export * from "./knowledge-base";
+export * from "./local-auth";
+export * from "./profile-avatar";
+export * from "./profiles";
+export * from "./bridge-api";
+export * from "./channel-org";
+export * from "./compatible-provider-config";
+export * from "./ollama-provider-config";
+export * from "./composio";
+export * from "./composio-config";
+export * from "./provider-label";
+export * from "./provider-setup-prompt";
+export * from "./skills";
+export * from "./soul";
+export * from "./telegram-config";
+export * from "./email-config";
+export { createSmtpSender } from "./mail/smtp-sender";
+export { createImapReader } from "./mail/imap-reader";
+export * from "./telegram-worker";
+// Explicit Discord exports — omit helpers that collide with telegram-* names
+// (maskBotToken, generateHandshakeCode, normalizeHandshakeInput, parseAllowedUserIds,
+// isHeartbeatAlive, isProcessAlive). Import those from @zoku/core/discord-config
+// or @zoku/core/discord-worker when the Discord-specific variant is required.
+export {
+  DEFAULT_DISCORD_PROFILE_ID,
+  type DiscordConfigFile,
+  type DiscordSettingsPublic,
+  type UpdateDiscordSettingsInput,
+  getDiscordConfigDir,
+  getDiscordConfigPath,
+  buildDiscordInviteUrl,
+  resolveDiscordApplicationId,
+  isDiscordUserAuthorized,
+  loadDiscordConfigFile,
+  toDiscordSettingsPublic,
+  loadDiscordSettingsPublic,
+  saveDiscordConfig,
+  regenerateDiscordHandshake,
+  verifyAndPairDiscordUser,
+  resolveDiscordConfigFromSources,
+} from "./discord-config";
+export {
+  type DiscordWorkerHeartbeat,
+  getDiscordWorkerHeartbeatPath,
+  resolveDiscordWorkerStatus,
+  parseDiscordWorkerHeartbeat,
+  writeDiscordWorkerHeartbeat,
+  clearDiscordWorkerHeartbeat,
+  readDiscordWorkerHeartbeat,
+  isDiscordWorkerRunning,
+  getDiscordWorkerStatus,
+} from "./discord-worker";
+export * from "./whatsapp-config";
+export * from "./whatsapp-worker";
+export * from "./worker-desired-state";
+export * from "./thinking-content";
+export * from "./tools";
+export * from "./user-config";
+export * from "./user-context";

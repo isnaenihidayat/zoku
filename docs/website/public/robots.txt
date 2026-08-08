@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://isnaenihidayat.github.io/zoku/sitemap.xml
+LLMS: https://isnaenihidayat.github.io/zoku/llms.txt

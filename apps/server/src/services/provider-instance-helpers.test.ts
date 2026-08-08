@@ -1,0 +1,224 @@
+import { describe, expect, test } from "bun:test";
+import type { ProviderInstance } from "@zoku/core";
+import {
+  applyProviderInstanceUpdate,
+  modelExistsOnInstance,
+  resolveProfileProviderSelection,
+} from "./provider-instance-helpers";
+
+function createProviderInstance(
+  overrides: Partial<ProviderInstance> & Pick<ProviderInstance, "id" | "type" | "label">,
+): ProviderInstance {
+  return {
+    apiKey: "test-key",
+    createdAt: "2026-06-18T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("resolveProfileProviderSelection", () => {
+  test("uses the explicitly selected provider instance for provider-qualified profile models", () => {
+    const providers: ProviderInstance[] = [
+      createProviderInstance({
+        id: "zen-1",
+        type: "opencode_go",
+        label: "OpenCode Zen",
+      }),
+      createProviderInstance({
+        id: "openai-1",
+        type: "openai",
+        label: "OpenAI",
+      }),
+    ];
+
+    const resolved = resolveProfileProviderSelection({
+      providers,
+      defaultProviderId: "zen-1",
+      profileModel: "openai-1::gpt-5.4",
+    });
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.instance.id).toBe("openai-1");
+    expect(resolved?.model).toBe("gpt-5.4");
+  });
+
+  test("falls back to the provider that actually supports a raw stored model id", () => {
+    const providers: ProviderInstance[] = [
+      createProviderInstance({
+        id: "zen-1",
+        type: "opencode_go",
+        label: "OpenCode Zen",
+      }),
+      createProviderInstance({
+        id: "openai-1",
+        type: "openai",
+        label: "OpenAI",
+      }),
+    ];
+
+    const resolved = resolveProfileProviderSelection({
+      providers,
+      defaultProviderId: "zen-1",
+      profileModel: "gpt-5.4",
+    });
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.instance.id).toBe("openai-1");
+    expect(resolved?.model).toBe("gpt-5.4");
+  });
+
+  test("falls back to the default provider when the profile does not override the model", () => {
+    const providers: ProviderInstance[] = [
+      createProviderInstance({
+        id: "zen-1",
+        type: "opencode_go",
+        label: "OpenCode Zen",
+      }),
+      createProviderInstance({
+        id: "openai-1",
+        type: "openai",
+        label: "OpenAI",
+      }),
+    ];
+
+    const resolved = resolveProfileProviderSelection({
+      providers,
+      defaultProviderId: "zen-1",
+      profileModel: null,
+    });
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.instance.id).toBe("zen-1");
+    expect(resolved?.model).toBe("opencode-go/kimi-k2.7-code");
+  });
+
+  test("does not treat catalog models as available on unrelated compatible providers", () => {
+    const zen = createProviderInstance({
+      id: "zen-1",
+      type: "openai_compatible",
+      label: "OpenCode Zen",
+      apiKey: "public",
+      baseUrl: "https://opencode.ai/zen/v1",
+      customModels: [{ id: "big-pickle", name: "Big Pickle", default: true }],
+    });
+
+    expect(modelExistsOnInstance(zen, "gpt-5.4")).toBe(false);
+    expect(modelExistsOnInstance(zen, "big-pickle")).toBe(true);
+
+    const resolved = resolveProfileProviderSelection({
+      providers: [
+        zen,
+        createProviderInstance({
+          id: "openai-1",
+          type: "openai",
+          label: "OpenAI",
+        }),
+      ],
+      defaultProviderId: "zen-1",
+      profileModel: "gpt-5.4",
+    });
+
+    expect(resolved?.instance.id).toBe("openai-1");
+    expect(resolved?.model).toBe("gpt-5.4");
+  });
+});
+
+describe("applyProviderInstanceUpdate", () => {
+  test("preserves supportsThinking on compatible custom models", () => {
+    const instance = createProviderInstance({
+      id: "compatible-1",
+      type: "openai_compatible",
+      label: "NetraRuntime",
+      apiKey: "",
+      baseUrl: "https://api.example.com/v1",
+      customModels: [
+        {
+          id: "qwen3.6-35b",
+          name: "Qwen 3.6 35B",
+          default: true,
+          supportsThinking: true,
+        },
+      ],
+    });
+
+    const updated = applyProviderInstanceUpdate(instance, {
+      customModels: [
+        {
+          id: "qwen3.6-35b",
+          name: "Qwen 3.6 35B",
+          default: true,
+          supportsThinking: true,
+        },
+      ],
+    });
+
+    expect(updated.customModels?.[0]?.supportsThinking).toBe(true);
+  });
+
+  test("stores custom model shortlist for OpenAI", () => {
+    const instance = createProviderInstance({
+      id: "openai-1",
+      type: "openai",
+      label: "OpenAI",
+    });
+
+    const updated = applyProviderInstanceUpdate(instance, {
+      customModels: [
+        { id: "gpt-5.4", name: "GPT 5.4", default: true },
+        { id: "gpt-4o-mini", name: "GPT-4o mini" },
+      ],
+    });
+
+    expect(updated.customModels).toHaveLength(2);
+    expect(modelExistsOnInstance(updated, "gpt-5.4")).toBe(true);
+    expect(modelExistsOnInstance(updated, "gpt-5.3-codex")).toBe(false);
+  });
+
+  test("validates cerebras models against shortlist and static catalog", () => {
+    const withShortlist = createProviderInstance({
+      id: "cb-1",
+      type: "cerebras",
+      label: "Cerebras",
+      customModels: [{ id: "gpt-oss-120b", name: "GPT OSS 120B", default: true }],
+    });
+
+    expect(modelExistsOnInstance(withShortlist, "gpt-oss-120b")).toBe(true);
+    expect(modelExistsOnInstance(withShortlist, "gemma-4-31b")).toBe(false);
+
+    const withoutShortlist = createProviderInstance({
+      id: "cb-2",
+      type: "cerebras",
+      label: "Cerebras",
+    });
+
+    expect(modelExistsOnInstance(withoutShortlist, "gemma-4-31b")).toBe(true);
+    expect(modelExistsOnInstance(withoutShortlist, "unknown-model")).toBe(false);
+  });
+
+  test("validates fireworks models against shortlist and static catalog", () => {
+    const withShortlist = createProviderInstance({
+      id: "fw-1",
+      type: "fireworks",
+      label: "Fireworks",
+      customModels: [
+        {
+          id: "accounts/fireworks/models/kimi-k2p6",
+          name: "Kimi K2.6",
+          default: true,
+        },
+      ],
+    });
+
+    expect(modelExistsOnInstance(withShortlist, "accounts/fireworks/models/kimi-k2p6")).toBe(true);
+    expect(modelExistsOnInstance(withShortlist, "accounts/fireworks/models/glm-5p2")).toBe(false);
+
+    const withoutShortlist = createProviderInstance({
+      id: "fw-2",
+      type: "fireworks",
+      label: "Fireworks",
+    });
+
+    expect(modelExistsOnInstance(withoutShortlist, "accounts/fireworks/models/glm-5p2")).toBe(true);
+    expect(modelExistsOnInstance(withoutShortlist, "accounts/unknown/models/foo")).toBe(false);
+  });
+});

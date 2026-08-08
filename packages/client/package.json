@@ -1,0 +1,14 @@
+{
+  "name": "@zoku/client",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@zoku/core": "workspace:*"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun"
+  }
+}

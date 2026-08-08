@@ -1,0 +1,39 @@
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vite";
+
+const root = fileURLToPath(new URL(".", import.meta.url));
+const serverUrl = process.env.zoku_SERVER_URL ?? "http://127.0.0.1:4310";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(root, "src"),
+      "@zoku/core/runtime": path.resolve(root, "src/shims/core-runtime.ts"),
+      "@zoku/core/local-auth": path.resolve(root, "src/shims/core-local-auth.ts"),
+      "@zoku/core/thinking-content": path.resolve(
+        root,
+        "../../packages/core/src/thinking-content.ts",
+      ),
+      // Native N-API converter — server-only; keep the browser bundle free of .node binaries.
+      [path.resolve(root, "../../packages/core/src/anydoc-text.ts")]: path.resolve(
+        root,
+        "src/shims/anydoc-text.ts",
+      ),
+      "@firecrawl/anydoc": path.resolve(root, "src/shims/firecrawl-anydoc.ts"),
+    },
+  },
+  server: {
+    port: 3003,
+    proxy: {
+      "/health": serverUrl,
+      "/v1": serverUrl,
+    },
+  },
+  preview: {
+    port: 3003,
+  },
+});

@@ -1,0 +1,15 @@
+{
+  "name": "@zoku/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@zoku/core": "workspace:*",
+    "bcryptjs": "^3.0.3"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun"
+  }
+}

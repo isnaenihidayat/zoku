@@ -1,0 +1,84 @@
+---
+title: "Quickstart"
+description: "Install Zoku with Bun or Docker and send your first chat message."
+---
+
+## Before you start
+
+You need:
+
+- An LLM provider API key (see [Providers](/providers))
+- [Bun](https://bun.sh) if you run from source — not needed for [Docker](/docker)
+
+## Choose a deployment path
+
+### Option 1: Docker
+
+For a single-container deployment:
+
+```bash
+docker pull ghcr.io/isnaenihidayat/zoku:latest
+docker run -d -p 4310:4310 -v zoku-data:/zoku/data --name zoku ghcr.io/isnaenihidayat/zoku:latest
+```
+
+Open `http://localhost:4310`. See [Docker](/docker) for build-from-source, volumes, and production notes.
+
+### Option 2: Local development
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/isnaenihidayat/zoku.git
+cd zoku
+bun install
+bun run dev:web
+```
+
+Open:
+
+- Dashboard: `http://localhost:3003`
+- API server: `http://127.0.0.1:4310`
+- API docs: `http://127.0.0.1:4310/docs`
+
+If you only want the API server:
+
+```bash
+bun run dev:server
+```
+
+On first run, Zoku asks for your provider and API key if they are not configured yet. Settings are saved in `~/.zoku/config.ini`.
+
+## First-time setup
+
+After Zoku is running:
+
+1. Open the dashboard
+2. Create the first admin account and first organization
+3. Configure your model provider
+4. Create or review profiles
+5. Send a test message to the default profile
+
+See [First-time setup](/first-time-setup) for the wizard walkthrough and [Providers](/providers) for supported LLM backends.
+
+## Common next steps
+
+### Connect a channel
+
+Use the web dashboard, [CLI](/cli), Telegram, WhatsApp, or Discord:
+
+- [CLI](/cli)
+- [Telegram](/telegram)
+- [WhatsApp](/whatsapp)
+- [Discord](/discord)
+
+### Understand the mental model
+
+Most of Zoku fits four ideas: organization, profile, tool access, and channel. See [Overview](/overview).
+
+## Next steps
+
+- [Overview](/overview) — what Zoku is and how to think about it
+- [Providers](/providers) — LLM API keys and model setup
+- [Profiles](/profiles) — how to define each bot
+- [Multi-tenancy](/multi-tenancy) — orgs, members, and roles
+- [Documentation hub](/docs/) — full docs map

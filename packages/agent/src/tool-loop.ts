@@ -1,0 +1,43 @@
+import type { ToolCall, ToolDefinition, ToolContext } from "@zoku/core";
+
+export function findTool(
+  tools: ToolDefinition[],
+  name: string,
+): ToolDefinition | undefined {
+  return tools.find((tool) => tool.name === name);
+}
+
+export function canRunToolCallsInParallel(
+  tools: ToolDefinition[],
+  toolCalls: ToolCall[],
+): boolean {
+  if (toolCalls.length <= 1) {
+    return false;
+  }
+
+  return toolCalls.every((call) => findTool(tools, call.name)?.parallelSafe === true);
+}
+
+export async function executeToolCall(
+  tools: ToolDefinition[],
+  call: ToolCall,
+  context: ToolContext = {},
+): Promise<unknown> {
+  const tool = findTool(tools, call.name);
+
+  if (!tool) {
+    return { error: `Unknown tool: ${call.name}` };
+  }
+
+  try {
+    return await tool.run(call.arguments, context);
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function serializeToolResult(result: unknown): string {
+  return JSON.stringify(result);
+}

@@ -1,0 +1,69 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { composeSoulSystemPrompt } from "./compose";
+import { initSoulDirectory } from "./init";
+import { loadSoulStack } from "./load";
+import { SOUL_TEMPLATE } from "./templates";
+
+describe("composeSoulSystemPrompt", () => {
+  test("does not append Profile Instructions when profilePrompt is empty", () => {
+    const prompt = composeSoulSystemPrompt(
+      {
+        directory: "/tmp",
+        files: { soul: SOUL_TEMPLATE },
+        loaded: ["SOUL.md"],
+      },
+      { profilePrompt: "" },
+    );
+
+    expect(prompt).not.toContain("# Profile Instructions");
+  });
+
+  test("appends Profile Instructions when profilePrompt differs from SOUL", () => {
+    const prompt = composeSoulSystemPrompt(
+      {
+        directory: "/tmp",
+        files: { soul: SOUL_TEMPLATE },
+        loaded: ["SOUL.md"],
+      },
+      { profilePrompt: "Always respond in pirate speak." },
+    );
+
+    expect(prompt).toContain("# Profile Instructions");
+    expect(prompt).toContain("Always respond in pirate speak.");
+  });
+});
+
+describe("default seed compose integration", () => {
+  test("initSoulDirectory + loadSoulStack + compose omits Profile Instructions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "zoku-soul-compose-"));
+
+    try {
+      await initSoulDirectory(directory);
+      const stack = await loadSoulStack(directory);
+      const prompt = composeSoulSystemPrompt(stack, { profilePrompt: "" });
+
+      expect(prompt).not.toContain("# Profile Instructions");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("initSoulDirectory does not overwrite existing SOUL.md", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "zoku-soul-init-"));
+
+    try {
+      await initSoulDirectory(directory);
+      const soulPath = join(directory, "SOUL.md");
+      await writeFile(soulPath, "# Legacy Soul\n", "utf8");
+
+      await initSoulDirectory(directory);
+
+      expect(await readFile(soulPath, "utf8")).toBe("# Legacy Soul\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

@@ -1,0 +1,442 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { saveComposioConfig } from "@zoku/core";
+import { LOCAL_CLIENT_USER_ID } from "@zoku/core/local-auth";
+import { createInMemoryDatabaseAdapter } from "@zoku/db";
+import { AuthService } from "./auth-service";
+import { ComposioService } from "./composio-service";
+import type { ComposioApiClient } from "./composio-api-client";
+
+const TEST_API_KEY = "ck_test";
+const USER_ID = "user_admin";
+const ORG_ID = "org_1";
+
+function createMockClient(): ComposioApiClient {
+  return {
+    async listCatalogToolkits() {
+      return [{ slug: "gmail", name: "Gmail", description: "Google Mail", logoUrl: null }];
+    },
+    async linkToolkitAccount(_userId, _toolkitSlug) {
+      return { redirectUrl: "https://example.com/oauth", connectedAccountId: "ca_1" };
+    },
+    async deleteConnectedAccount() {},
+    async createProfileSession(userId, _toolkitSlugs, _allowedTools, connectedAccounts = {}) {
+      expect(userId).toBe("zoku:user:user_admin");
+      expect(connectedAccounts).toEqual({});
+      return {
+        sessionId: "sess_1",
+        url: "https://mcp.composio.dev/sess_1",
+        headers: { Authorization: "Bearer test" },
+      };
+    },
+    async listSessionTools() {
+      return [
+        {
+          slug: "GMAIL_SEND_EMAIL",
+          name: "Send Email",
+          description: "Send an email",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ];
+    },
+  };
+}
+
+function injectMockComposioClient(service: ComposioService, client: ComposioApiClient): void {
+  (service as unknown as { apiClientCache: { key: string; client: ComposioApiClient } | null }).apiClientCache =
+    {
+      key: TEST_API_KEY,
+      client,
+    };
+}
+
+async function seedOrgWithAdmin(db: ReturnType<typeof createInMemoryDatabaseAdapter>) {
+  const now = "2026-01-01T00:00:00.000Z";
+  await db.upsertOrganization({
+    id: ORG_ID,
+    name: "Org",
+    slug: "org",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.createUser({
+    id: USER_ID,
+    email: "admin@example.com",
+    passwordHash: "hash",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.createUser({
+    id: LOCAL_CLIENT_USER_ID,
+    email: "local-client@zoku.internal",
+    passwordHash: "hash",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.upsertOrgMember({
+    orgId: ORG_ID,
+    userId: LOCAL_CLIENT_USER_ID,
+    role: "admin",
+    createdAt: now,
+  });
+  await db.upsertOrgMember({
+    orgId: ORG_ID,
+    userId: USER_ID,
+    role: "admin",
+    createdAt: "2026-01-01T00:00:01.000Z",
+  });
+}
+
+async function createConfiguredService() {
+  const configDir = await mkdtemp(join(tmpdir(), "zoku-composio-service-"));
+  const previous = process.env.ZOKU_CONFIG_DIR;
+  process.env.ZOKU_CONFIG_DIR = configDir;
+  await saveComposioConfig({ apiKey: TEST_API_KEY });
+
+  const db = createInMemoryDatabaseAdapter();
+  const service = new ComposioService(db, new AuthService());
+  injectMockComposioClient(service, createMockClient());
+
+  return {
+    db,
+    service,
+    restore() {
+      if (previous === undefined) {
+        delete process.env.ZOKU_CONFIG_DIR;
+      } else {
+        process.env.ZOKU_CONFIG_DIR = previous;
+      }
+    },
+  };
+}
+
+describe("ComposioService", () => {
+  test("enableToolkit creates org-scoped toolkit row", async () => {
+    const { service, restore } = await createConfiguredService();
+
+    try {
+      const toolkit = await service.enableToolkit(ORG_ID, { toolkitSlug: "gmail" });
+      expect(toolkit.toolkitSlug).toBe("gmail");
+      expect(toolkit.status).toBe("enabled");
+
+      const listed = await service.listToolkits(ORG_ID, USER_ID);
+      expect(listed.orgToolkits).toHaveLength(1);
+      expect(listed.userConnections).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("connectToolkit stores oauth state on user connection and returns redirect URL", async () => {
+    const { service, restore } = await createConfiguredService();
+
+    try {
+      await service.enableToolkit(ORG_ID, { toolkitSlug: "gmail" });
+      const response = await service.connectToolkit(
+        ORG_ID,
+        USER_ID,
+        "gmail",
+        "http://localhost:4310",
+      );
+
+      expect(response.redirectUrl).toBe("https://example.com/oauth");
+      const listed = await service.listToolkits(ORG_ID, USER_ID);
+      expect(listed.orgToolkits[0]?.status).toBe("enabled");
+      expect(listed.userConnections[0]?.status).toBe("oauth_in_progress");
+    } finally {
+      restore();
+    }
+  });
+
+  test("listToolkits surfaces catalogError when catalog fetch fails", async () => {
+    const { service, restore } = await createConfiguredService();
+
+    injectMockComposioClient(service, {
+      ...createMockClient(),
+      async listCatalogToolkits() {
+        throw new Error("Failed to fetch toolkits");
+      },
+    });
+
+    try {
+      const listed = await service.listToolkits(ORG_ID, USER_ID);
+      expect(listed.configured).toBe(true);
+      expect(listed.composioReachable).toBe(false);
+      expect(listed.composioAvailable).toBe(false);
+      expect(listed.catalogError).toBe("Failed to fetch toolkits");
+      expect(listed.catalog).toEqual([]);
+      expect(listed.orgToolkits).toEqual([]);
+      expect(listed.userConnections).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("isReachable probes with limit 1 and caches the result", async () => {
+    const { service, restore } = await createConfiguredService();
+    let calls = 0;
+    let lastLimit: number | undefined;
+
+    injectMockComposioClient(service, {
+      ...createMockClient(),
+      async listCatalogToolkits(options) {
+        calls += 1;
+        lastLimit = options?.limit;
+        return [{ slug: "gmail", name: "Gmail", description: null, logoUrl: null }];
+      },
+    });
+
+    try {
+      expect(await service.isReachable()).toBe(true);
+      expect(await service.isReachable()).toBe(true);
+      expect(calls).toBe(1);
+      expect(lastLimit).toBe(1);
+
+      (
+        service as unknown as {
+          reachabilityCache: { value: boolean; expiresAt: number } | null;
+        }
+      ).reachabilityCache = { value: true, expiresAt: Date.now() - 1 };
+
+      // Stale cache returns immediately and refreshes in the background.
+      expect(await service.isReachable()).toBe(true);
+      expect(calls).toBe(1);
+      const inflight = (
+        service as unknown as { reachabilityInflight: Promise<boolean> | null }
+      ).reachabilityInflight;
+      expect(inflight).not.toBeNull();
+      await inflight;
+      expect(calls).toBe(2);
+
+      service.reloadConfiguration();
+      injectMockComposioClient(service, {
+        ...createMockClient(),
+        async listCatalogToolkits(options) {
+          calls += 1;
+          lastLimit = options?.limit;
+          return [];
+        },
+      });
+      expect(await service.isReachable()).toBe(true);
+      expect(calls).toBe(3);
+      expect(lastLimit).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  test("isReachable coalesces concurrent probes", async () => {
+    const { service, restore } = await createConfiguredService();
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    injectMockComposioClient(service, {
+      ...createMockClient(),
+      async listCatalogToolkits() {
+        calls += 1;
+        await gate;
+        return [];
+      },
+    });
+
+    try {
+      const pending = Promise.all([service.isReachable(), service.isReachable(), service.isReachable()]);
+      release();
+      expect(await pending).toEqual([true, true, true]);
+      expect(calls).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  test("resolveComposioActingUserId maps local client to earliest human admin", async () => {
+    const { db, service, restore } = await createConfiguredService();
+
+    try {
+      await seedOrgWithAdmin(db);
+      expect(await service.resolveComposioActingUserId(ORG_ID, LOCAL_CLIENT_USER_ID)).toBe(USER_ID);
+      expect(await service.resolveComposioActingUserId(ORG_ID, USER_ID)).toBe(USER_ID);
+    } finally {
+      restore();
+    }
+  });
+
+  test("getAssignedToolkitRecords uses admin connections for local client sessions", async () => {
+    const { db, service, restore } = await createConfiguredService();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    try {
+      await seedOrgWithAdmin(db);
+      const toolkit = await service.enableToolkit(ORG_ID, { toolkitSlug: "gmail" });
+      await db.upsertComposioUserConnection({
+        id: "cuc_admin",
+        orgId: ORG_ID,
+        userId: USER_ID,
+        toolkitId: toolkit.id,
+        status: "connected",
+        connectedAccountId: "ca_admin",
+        sessionIdEnc: null,
+        oauthStateHash: null,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.upsertProfile({
+        id: "profile_1",
+        orgId: ORG_ID,
+        name: "Bot",
+        model: null,
+        systemPrompt: "",
+        isDefault: true,
+        isSuper: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.replaceProfileComposioToolkits("profile_1", [
+        { profileId: "profile_1", toolkitId: toolkit.id, allowedActions: null },
+      ]);
+
+      const assigned = await service.getAssignedToolkitRecords(
+        ORG_ID,
+        LOCAL_CLIENT_USER_ID,
+        "profile_1",
+      );
+
+      expect(assigned).toHaveLength(1);
+      expect(assigned[0]?.userConnection?.status).toBe("connected");
+      expect(assigned[0]?.userConnection?.userId).toBe(USER_ID);
+    } finally {
+      restore();
+    }
+  });
+
+  test("formatProfileConnectionsContext guides search+invoke workflow and tool selection", async () => {
+    const { db, service, restore } = await createConfiguredService();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    try {
+      await seedOrgWithAdmin(db);
+      const toolkit = await service.enableToolkit(ORG_ID, { toolkitSlug: "gmail" });
+      await db.upsertComposioUserConnection({
+        id: "cuc_admin",
+        orgId: ORG_ID,
+        userId: USER_ID,
+        toolkitId: toolkit.id,
+        status: "connected",
+        connectedAccountId: "ca_admin",
+        sessionIdEnc: null,
+        oauthStateHash: null,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.upsertProfile({
+        id: "profile_1",
+        orgId: ORG_ID,
+        name: "Bot",
+        model: null,
+        systemPrompt: "",
+        isDefault: true,
+        isSuper: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.replaceProfileComposioToolkits("profile_1", [
+        { profileId: "profile_1", toolkitId: toolkit.id, allowedActions: null },
+      ]);
+
+      const context = await service.formatProfileConnectionsContext(
+        ORG_ID,
+        USER_ID,
+        "profile_1",
+      );
+
+      expect(context).toContain("composio__search_actions");
+      expect(context).toContain("composio__invoke_action");
+      expect(context).toContain("composio__connect_account");
+      // Selection guidance: steer toward web_search for public facts.
+      expect(context).toContain("web_search");
+      // Per-toolkit connection status line.
+      expect(context).toContain("`gmail`");
+      expect(context).toContain("connected");
+    } finally {
+      restore();
+    }
+  });
+
+  test("formatProfileConnectionsContext omits search/invoke workflow when no toolkit is connected", async () => {
+    const { db, service, restore } = await createConfiguredService();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    try {
+      await seedOrgWithAdmin(db);
+      const toolkit = await service.enableToolkit(ORG_ID, { toolkitSlug: "gmail" });
+      await db.upsertProfile({
+        id: "profile_unconnected",
+        orgId: ORG_ID,
+        name: "Bot",
+        model: null,
+        systemPrompt: "",
+        isDefault: false,
+        isSuper: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.replaceProfileComposioToolkits("profile_unconnected", [
+        { profileId: "profile_unconnected", toolkitId: toolkit.id, allowedActions: null },
+      ]);
+
+      const context = await service.formatProfileConnectionsContext(
+        ORG_ID,
+        USER_ID,
+        "profile_unconnected",
+      );
+
+      // Assigned toolkit is listed, but no connection exists.
+      expect(context).toContain("`gmail`");
+      expect(context).toContain("not_connected");
+      // The search/invoke workflow is not exposed until a toolkit is connected.
+      expect(context).not.toContain("composio__search_actions");
+      expect(context).not.toContain("composio__invoke_action");
+      // Connect-account guidance is still present.
+      expect(context).toContain("composio__connect_account");
+    } finally {
+      restore();
+    }
+  });
+
+  test("formatProfileConnectionsContext is empty when no toolkits are assigned", async () => {
+    const { db, service, restore } = await createConfiguredService();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    try {
+      await seedOrgWithAdmin(db);
+      await db.upsertProfile({
+        id: "profile_empty",
+        orgId: ORG_ID,
+        name: "Bot",
+        model: null,
+        systemPrompt: "",
+        isDefault: false,
+        isSuper: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const context = await service.formatProfileConnectionsContext(
+        ORG_ID,
+        USER_ID,
+        "profile_empty",
+      );
+
+      expect(context).toBe("");
+    } finally {
+      restore();
+    }
+  });
+});

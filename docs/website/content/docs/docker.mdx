@@ -1,0 +1,48 @@
+---
+title: "Docker"
+description: "Run Zoku in a single Docker container with persistent data volumes."
+---
+
+## Quick run
+
+Pull the prebuilt image and start Zoku:
+
+```bash
+docker pull ghcr.io/isnaenihidayat/zoku:latest
+docker run -d -p 4310:4310 -v zoku-data:/zoku/data --name zoku ghcr.io/isnaenihidayat/zoku:latest
+```
+
+Open `http://localhost:4310`. The container serves the API, web dashboard, and platform workers together.
+
+Data is stored at `/zoku/data` inside the container. The `-v zoku-data:/zoku/data` volume persists orgs, profiles, sessions, provider settings, and the local SQLite database across restarts.
+
+## Build from source
+
+From the repository root:
+
+```bash
+./scripts/docker-build-run.sh
+```
+
+The script uses `docker buildx` (default `linux/amd64`), then starts the container.
+
+## Configuration
+
+The data root follows `ZOKU_CONFIG_DIR` when set. By default it is `/zoku/data` in the container (mapped to your Docker volume).
+
+On first run, complete the setup wizard in the browser and add your LLM provider. See [Providers](/providers) and [First-time setup](/first-time-setup).
+
+## Reset a local Docker install
+
+To remove the container, volume, and image and start fresh:
+
+```bash
+./scripts/docker-destroy.sh
+./scripts/docker-build-run.sh
+```
+
+## Next steps
+
+- [Quickstart](/quickstart) — first-run flow from zero
+- [Backup and restore](/backup-restore) — export and restore your data root
+- [Providers](/providers) — LLM API keys and models
