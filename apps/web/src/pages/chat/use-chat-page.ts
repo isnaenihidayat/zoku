@@ -57,6 +57,7 @@ import {
   seedStreamingStateForActiveTurn,
 } from "@/lib/chat-stream-resume";
 import { client, formatError } from "@/lib/client";
+import { ZokuApiError } from "@zoku/core/api-error";
 import {
   buildAutoEnableThinkingPayload,
   DEFAULT_THINKING_EFFORT,
@@ -815,19 +816,19 @@ export function useChatPage() {
       }
       approvalResolvingRef.current = true;
       try {
-        const response = await fetch(
+        await client.request<{ ok: boolean }>(
           `/v1/sessions/${encodeURIComponent(current.sessionId)}/tool-approvals`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ toolCallId: current.toolCallId, decision }),
           },
         );
-        if (!response.ok) {
-          setError(`Failed to ${decision} tool approval (HTTP ${response.status})`);
-        }
       } catch (err) {
-        setError(formatError(err));
+        if (err instanceof ZokuApiError) {
+          setError(`Failed to ${decision} tool approval (HTTP ${err.status})`);
+        } else {
+          setError(formatError(err));
+        }
       } finally {
         approvalResolvingRef.current = false;
         setPendingToolApproval(null);

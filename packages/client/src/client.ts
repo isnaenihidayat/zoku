@@ -1868,7 +1868,7 @@ export class ZokuClient {
     });
   }
 
-  private async request<T>(
+  async request<T>(
     path: string,
     init?: RequestInit,
     retried = false,
